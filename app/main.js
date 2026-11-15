@@ -1,31 +1,84 @@
-// A make.fun frontend: the board of open bounties and a page for each, on hash routes.
-//
-//   #/                the board
-//   #/bounty/<slug>   one bounty
-//
-// window.__shotReady is false while a page loads and true once its data is on screen, so a
-// screenshot script knows when to capture.
+// app/main.js — route coordinator for #/, #/b/<slug>, #/b/<slug>/lb, and #/u/<handle>.
+// It calls no API directly; board, bounty, leaderboard, and profile modules own their GET requests.
 
-import { getBounties, getBounty } from './api.js';
-import { board, bounty } from './views.js';
+import { boardView, bountyView } from './views.js';
+import { leaderboardView } from './leaderboard.js';
+import { profileView } from './profile.js';
 
-const app = document.getElementById('app');
+const main = document.querySelector('main');
+const search = document.querySelector('#site-search');
+const savedScrollPositions = new Map();
 
-async function render() {
-  window.__shotReady = false;
-  app.innerHTML = '<p>Loading…</p>';
-  const match = location.hash.match(/^#\/bounty\/([^/]+)/);
-  if (match) {
-    const b = await getBounty(decodeURIComponent(match[1]));
-    document.title = `${b.title} | make.fun bounties`;
-    app.innerHTML = bounty(b);
-  } else {
-    document.title = 'make.fun bounties';
-    app.innerHTML = board(await getBounties());
+let currentView;
+let previousRoute = '#/';
+
+window.__shotReady = false;
+
+function parseRoute() {
+  const rawRoute = location.hash || '#/';
+  const parts = rawRoute
+    .replace(/^#/, '')
+    .split('/')
+    .filter(Boolean)
+    .map(decodeURIComponent);
+
+  if (parts.length === 0) {
+    return { name: 'board', key: '#/' };
   }
-  window.scrollTo(0, 0);
-  window.__shotReady = true;
+
+  if (parts[0] === 'b' && parts[1] && parts[2] === 'lb') {
+    return { name: 'leaderboard', slug: parts[1], key: rawRoute };
+  }
+
+  if (parts[0] === 'b' && parts[1]) {
+    return { name: 'bounty', slug: parts[1], key: rawRoute };
+  }
+
+  if (parts[0] === 'u' && parts[1]) {
+    return { name: 'profile', handle: parts[1], key: rawRoute };
+  }
+
+  return { name: 'board', key: '#/' };
 }
 
-window.addEventListener('hashchange', render);
-render();
+function createView(route) {
+  if (route.name === 'bounty') {
+    return bountyView(route.slug);
+  }
+
+  if (route.name === 'leaderboard') {
+    return leaderboardView(route.slug);
+  }
+
+  if (route.name === 'profile') {
+    return profileView(route.handle);
+  }
+
+  return boardView();
+}
+
+function navigate() {
+  savedScrollPositions.set(previousRoute, window.scrollY);
+  currentView?.unmount();
+  window.__shotReady = false;
+
+  const route = parseRoute();
+  previousRoute = route.key;
+  currentView = createView(route);
+  currentView.mount(main);
+
+  requestAnimationFrame(() => {
+    window.scrollTo(0, savedScrollPositions.get(route.key) || 0);
+  });
+}
+
+search.addEventListener('input', () => {
+  if (!location.hash || location.hash === '#/') {
+    window.dispatchEvent(new Event('board-search'));
+  } else {
+    location.hash = '#/';
+  }
+});
+
+window.addEventListener('hashchange', navigate);
+navigate();
